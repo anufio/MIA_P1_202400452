@@ -1,6 +1,6 @@
 package commands
 
-// cmd_mount.go
+// cmd_mount.go: comandos para montar y desmontar particiones, y listar las particiones montadas
 
 import (
 	"MIA_P1_202400452/disk"
@@ -96,7 +96,12 @@ func CmdMOUNT(params map[string]string) string {
 		Partition:      selectedPartition,
 	}
 
-	return fmt.Sprintf("Partición '%s' montada exitosamente con ID: '%s'", name, id)
+	return fmt.Sprintf(
+		"Partición '%s' montada exitosamente con ID: '%s'\n\n%s",
+		name,
+		id,
+		CmdMOUNTED(),
+	)
 }
 
 func CmdUNMOUNT(params map[string]string) string {

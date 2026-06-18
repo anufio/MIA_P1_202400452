@@ -4,6 +4,7 @@ package reports
 import (
 	"MIA_P1_202400452/commands"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -28,6 +29,8 @@ func CmdREP(params map[string]string) string {
 	if !ok || strings.TrimSpace(id) == "" {
 		return "Error: falta el parámetro obligatorio -id"
 	}
+
+	path = reportLocalPath(path)
 
 	diskPath, partition, _, err := commands.GetMountedPartitionInfo(id)
 	if err != nil {
@@ -106,4 +109,18 @@ func handleReport(fn func() error) string {
 	}
 
 	return "Reporte generado exitosamente"
+}
+
+func reportLocalPath(originalPath string) string {
+	originalPath = strings.TrimSpace(originalPath)
+
+	cleanPath := filepath.Clean(originalPath)
+	fileName := filepath.Base(cleanPath)
+	folderName := filepath.Base(filepath.Dir(cleanPath))
+
+	if folderName == "." || folderName == "/" {
+		return filepath.Join("reportes", fileName)
+	}
+
+	return filepath.Join("reportes", folderName, fileName)
 }

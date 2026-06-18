@@ -1,6 +1,6 @@
 package commands
 
-// cmd_fdisk.go
+// cmd_fdisk.go: comando para crear particiones en un disco existente
 
 import (
 	"MIA_P1_202400452/disk"

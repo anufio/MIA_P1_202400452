@@ -1,6 +1,6 @@
 package main
 
-// main.go
+// main.go: punto de entrada del programa
 
 import (
 	"bufio"

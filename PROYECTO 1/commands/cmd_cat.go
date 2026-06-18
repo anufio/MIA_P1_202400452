@@ -1,6 +1,6 @@
 package commands
 
-//cmd_cat.go
+//cmd_cat.go: comando para mostrar el contenido de archivos
 
 import (
 	"MIA_P1_202400452/ext2"

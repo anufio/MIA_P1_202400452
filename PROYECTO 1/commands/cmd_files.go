@@ -1,6 +1,6 @@
 package commands
 
-// cmd_files.go
+// cmd_files.go: comandos para crear archivos y directorios en un sistema de archivos EXT2
 
 import (
 	"MIA_P1_202400452/ext2"

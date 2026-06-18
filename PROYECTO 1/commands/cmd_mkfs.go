@@ -1,6 +1,6 @@
 package commands
 
-// cmd_mkfs.go
+// cmd_mkfs.go: comando para formatear una partición montada con el sistema de archivos EXT2
 
 import (
 	"MIA_P1_202400452/ext2"

@@ -1,6 +1,6 @@
 package commands
 
-// cmd_session.go
+// cmd_session.go: comandos relacionados con la gestión de sesiones de usuario (login/logout)
 
 import (
 	"MIA_P1_202400452/ext2"

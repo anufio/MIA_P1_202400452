@@ -1,6 +1,6 @@
 package commands
 
-// cmd_users.go
+// cmd_users.go: comandos para gestionar usuarios y grupos en el sistema de archivos EXT2, utilizando el archivo users.txt como base de datos de usuarios y grupos
 
 import (
 	"MIA_P1_202400452/ext2"

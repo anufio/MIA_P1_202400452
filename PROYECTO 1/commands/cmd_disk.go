@@ -1,6 +1,6 @@
 package commands
 
-// cmd_disk.go
+// cmd_disk.go: comandos relacionados con la creación y eliminación de discos
 
 import (
 	"MIA_P1_202400452/disk"

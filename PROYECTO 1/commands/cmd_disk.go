@@ -29,12 +29,18 @@ func CmdMKDISK(params map[string]string) string {
 		return "Error: falta el parámetro obligatorio -path"
 	}
 
-	if strings.TrimSpace(path) == "" {
+	path = strings.TrimSpace(path)
+
+	if path == "" {
 		return "Error: -path no puede estar vacío"
 	}
 
 	if !hasValidDiskExtension(path) {
 		return "Error: el archivo debe tener extensión .mia o .dsk"
+	}
+
+	if disk.DiskExists(path) {
+		return fmt.Sprintf("Error: el archivo de disco ya existe: %s", path)
 	}
 
 	unit := "M"
@@ -106,7 +112,9 @@ func CmdRMDISK(params map[string]string) string {
 		return "Error: falta el parámetro obligatorio -path"
 	}
 
-	if strings.TrimSpace(path) == "" {
+	path = strings.TrimSpace(path)
+
+	if path == "" {
 		return "Error: -path no puede estar vacío"
 	}
 

@@ -1,6 +1,6 @@
 package commands
 
-// cmd_mount.go: comandos para montar y desmontar particiones, y listar las particiones montadas
+// cmd_mount.go: comandos para montar, desmontar y listar particiones montadas
 
 import (
 	"MIA_P1_202400452/disk"
@@ -15,13 +15,17 @@ type MountedPartition struct {
 	Name           string
 	PartitionIndex int
 	Partition      disk.Partition
+	IsLogical      bool
+	EBRStart       int64
 }
 
 var mountTable = make(map[string]MountedPartition)
 
 var diskLetterMap = make(map[string]string)
-
 var nextDiskLetterIndex = 0
+
+var logicalNumberMap = make(map[string]int32)
+var nextLogicalNumber int32 = 1
 
 const CarnetPrefix = "52"
 
@@ -29,6 +33,12 @@ func CmdMOUNT(params map[string]string) string {
 	path, ok := params["path"]
 	if !ok {
 		return "Error: falta el parámetro obligatorio -path"
+	}
+
+	path = strings.TrimSpace(path)
+
+	if path == "" {
+		return "Error: -path no puede estar vacío"
 	}
 
 	if !disk.DiskExists(path) {
@@ -40,39 +50,33 @@ func CmdMOUNT(params map[string]string) string {
 		return "Error: falta el parámetro obligatorio -name"
 	}
 
-	mbr, err := disk.ReadMBR(path)
-	if err != nil {
-		return fmt.Sprintf("Error al leer MBR: %v", err)
-	}
+	name = strings.TrimSpace(name)
 
-	partIdx := -1
-	var selectedPartition disk.Partition
-
-	for i, p := range mbr.MbrPartitions {
-		pName := strings.TrimRight(string(p.PartName[:]), "\x00")
-
-		if pName == name && p.PartStart > 0 {
-			if p.PartType[0] != 'P' {
-				return fmt.Sprintf("Error: la partición '%s' no es primaria. El manejo de archivos EXT2 se realiza sobre particiones primarias", name)
-			}
-
-			partIdx = i
-			selectedPartition = p
-			break
-		}
-	}
-
-	if partIdx == -1 {
-		return fmt.Sprintf("Error: no existe una partición primaria con el nombre '%s'", name)
+	if name == "" {
+		return "Error: -name no puede estar vacío"
 	}
 
 	for _, mp := range mountTable {
-		if mp.DiskPath == path && mp.Name == name {
-			return fmt.Sprintf("Partición '%s' ya está montada con ID: '%s'", name, mp.ID)
+		if mp.DiskPath == path && strings.EqualFold(mp.Name, name) {
+			return fmt.Sprintf(
+				"Partición '%s' ya está montada con ID: '%s'\n\n%s",
+				name,
+				mp.ID,
+				CmdMOUNTED(),
+			)
 		}
 	}
 
-	partitionNumber := getPartitionNumber(selectedPartition, partIdx)
+	selectedPartition, partIdx, isLogical, ebrStart, found, err := findMountablePartition(path, name)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	if !found {
+		return fmt.Sprintf("Error: no existe una partición primaria o lógica con el nombre '%s'", name)
+	}
+
+	partitionNumber := getPartitionNumberForID(path, name, selectedPartition, partIdx, isLogical)
 	diskLetter := getDiskLetter(path)
 
 	id := fmt.Sprintf("%s%d%s", CarnetPrefix, partitionNumber, diskLetter)
@@ -88,13 +92,21 @@ func CmdMOUNT(params map[string]string) string {
 	copy(idArr[:], id)
 	selectedPartition.PartId = idArr
 
-	mountTable[id] = MountedPartition{
+	mp := MountedPartition{
 		ID:             id,
 		DiskPath:       path,
 		Name:           name,
 		PartitionIndex: partIdx,
 		Partition:      selectedPartition,
+		IsLogical:      isLogical,
+		EBRStart:       ebrStart,
 	}
+
+	if err := writeMountStateToDisk(mp, true); err != nil {
+		return fmt.Sprintf("Error al actualizar estado de montaje: %v", err)
+	}
+
+	mountTable[id] = mp
 
 	return fmt.Sprintf(
 		"Partición '%s' montada exitosamente con ID: '%s'\n\n%s",
@@ -112,16 +124,27 @@ func CmdUNMOUNT(params map[string]string) string {
 
 	id = strings.ToUpper(strings.TrimSpace(id))
 
+	if id == "" {
+		return "Error: -id no puede estar vacío"
+	}
+
 	mp, ok := mountTable[id]
 	if !ok {
 		return fmt.Sprintf("Error: el ID '%s' no está montado", id)
+	}
+
+	if err := writeMountStateToDisk(mp, false); err != nil {
+		return fmt.Sprintf("Error al actualizar estado de desmontaje: %v", err)
 	}
 
 	delete(mountTable, id)
 
 	if currentSession.Active && strings.ToUpper(currentSession.PartID) == id {
 		currentSession = Session{}
-		return fmt.Sprintf("Partición '%s' desmontada exitosamente. La sesión activa fue cerrada porque pertenecía a esa partición.", mp.Name)
+		return fmt.Sprintf(
+			"Partición '%s' desmontada exitosamente. La sesión activa fue cerrada porque pertenecía a esa partición.",
+			mp.Name,
+		)
 	}
 
 	return fmt.Sprintf("Partición '%s' desmontada exitosamente.", mp.Name)
@@ -141,6 +164,19 @@ func GetMountedPartitionInfo(id string) (string, disk.Partition, int, error) {
 		return "", disk.Partition{}, -1, fmt.Errorf("el ID '%s' no está montado", id)
 	}
 
+	if mp.IsLogical {
+		ebr, err := disk.ReadEBR(mp.DiskPath, mp.EBRStart)
+		if err != nil {
+			return "", disk.Partition{}, -1, err
+		}
+
+		partition := logicalEBRToPartition(ebr, mp.Name)
+		partition.PartStatus = [1]byte{'1'}
+		partition.PartId = mp.Partition.PartId
+
+		return mp.DiskPath, partition, -1, nil
+	}
+
 	mbr, err := disk.ReadMBR(mp.DiskPath)
 	if err != nil {
 		return "", disk.Partition{}, -1, err
@@ -151,9 +187,9 @@ func GetMountedPartitionInfo(id string) (string, disk.Partition, int, error) {
 	}
 
 	p := mbr.MbrPartitions[mp.PartitionIndex]
-	pName := strings.TrimRight(string(p.PartName[:]), "\x00")
+	pName := cleanPartitionName(p.PartName[:])
 
-	if p.PartStart <= 0 || p.PartType[0] != 'P' || pName != mp.Name {
+	if p.PartStart <= 0 || p.PartType[0] != 'P' || !strings.EqualFold(pName, mp.Name) {
 		return "", disk.Partition{}, -1, fmt.Errorf("partición montada con ID '%s' no encontrada en el disco", id)
 	}
 
@@ -181,18 +217,129 @@ func CmdMOUNTED() string {
 
 	for _, id := range ids {
 		mp := mountTable[id]
-		sb.WriteString(fmt.Sprintf(" ID: %s | Disco: %s | Partición: %s\n", id, mp.DiskPath, mp.Name))
+		sb.WriteString(fmt.Sprintf(
+			" ID: %s | Disco: %s | Partición: %s\n",
+			id,
+			mp.DiskPath,
+			mp.Name,
+		))
 	}
 
 	return sb.String()
 }
 
-func getPartitionNumber(partition disk.Partition, index int) int32 {
-	if partition.PartCorrelative > 0 {
-		return partition.PartCorrelative
+func findMountablePartition(path string, name string) (disk.Partition, int, bool, int64, bool, error) {
+	mbr, err := disk.ReadMBR(path)
+	if err != nil {
+		return disk.Partition{}, -1, false, -1, false, fmt.Errorf("error al leer MBR: %v", err)
 	}
 
-	return int32(index + 1)
+	for i, p := range mbr.MbrPartitions {
+		if p.PartStart <= 0 {
+			continue
+		}
+
+		pName := cleanPartitionName(p.PartName[:])
+
+		if strings.EqualFold(pName, name) {
+			switch p.PartType[0] {
+			case 'P':
+				return p, i, false, -1, true, nil
+
+			case 'E':
+				return disk.Partition{}, -1, false, -1, false,
+					fmt.Errorf("la partición '%s' es extendida. Las extendidas no se montan como EXT2; solo contienen particiones lógicas", name)
+
+			default:
+				return disk.Partition{}, -1, false, -1, false,
+					fmt.Errorf("la partición '%s' tiene un tipo inválido", name)
+			}
+		}
+	}
+
+	if ext, _, foundExt := disk.GetExtended(mbr); foundExt {
+		ebr, ebrPos, foundLogical := disk.FindLogicalByName(path, ext, name)
+		if foundLogical {
+			partition := logicalEBRToPartition(ebr, name)
+			return partition, -1, true, ebrPos, true, nil
+		}
+	}
+
+	return disk.Partition{}, -1, false, -1, false, nil
+}
+
+func logicalEBRToPartition(ebr disk.EBR, name string) disk.Partition {
+	var nameArr [16]byte
+	copy(nameArr[:], name)
+
+	return disk.Partition{
+		PartStatus:      ebr.PartMount,
+		PartType:        [1]byte{'L'},
+		PartFit:         ebr.PartFit,
+		PartStart:       ebr.PartStart,
+		PartS:           ebr.PartS,
+		PartName:        nameArr,
+		PartCorrelative: 0,
+		PartId:          [4]byte{},
+	}
+}
+
+func writeMountStateToDisk(mp MountedPartition, mounted bool) error {
+	if mp.IsLogical {
+		ebr, err := disk.ReadEBR(mp.DiskPath, mp.EBRStart)
+		if err != nil {
+			return err
+		}
+
+		if mounted {
+			ebr.PartMount = [1]byte{'1'}
+		} else {
+			ebr.PartMount = [1]byte{'0'}
+		}
+
+		return disk.WriteEBR(mp.DiskPath, mp.EBRStart, ebr)
+	}
+
+	mbr, err := disk.ReadMBR(mp.DiskPath)
+	if err != nil {
+		return err
+	}
+
+	if mp.PartitionIndex < 0 || mp.PartitionIndex >= len(mbr.MbrPartitions) {
+		return fmt.Errorf("índice de partición inválido")
+	}
+
+	if mounted {
+		mbr.MbrPartitions[mp.PartitionIndex].PartStatus = [1]byte{'1'}
+		mbr.MbrPartitions[mp.PartitionIndex].PartId = mp.Partition.PartId
+	} else {
+		mbr.MbrPartitions[mp.PartitionIndex].PartStatus = [1]byte{'0'}
+		mbr.MbrPartitions[mp.PartitionIndex].PartId = [4]byte{}
+	}
+
+	return disk.WriteMBR(mp.DiskPath, mbr)
+}
+
+func getPartitionNumberForID(path string, name string, partition disk.Partition, index int, isLogical bool) int32 {
+	if !isLogical {
+		if partition.PartCorrelative > 0 {
+			return partition.PartCorrelative
+		}
+
+		return int32(index + 1)
+	}
+
+	key := strings.ToLower(strings.TrimSpace(path + "::" + name))
+
+	if n, ok := logicalNumberMap[key]; ok {
+		return n
+	}
+
+	n := nextLogicalNumber
+	logicalNumberMap[key] = n
+	nextLogicalNumber++
+
+	return n
 }
 
 func getDiskLetter(path string) string {
@@ -205,4 +352,8 @@ func getDiskLetter(path string) string {
 	nextDiskLetterIndex++
 
 	return letter
+}
+
+func cleanPartitionName(raw []byte) string {
+	return strings.TrimSpace(strings.TrimRight(string(raw), "\x00"))
 }

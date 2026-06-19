@@ -1,9 +1,11 @@
 package reports
 
-// rep.go
+// rep.go: comando REP para generar reportes
+
 import (
 	"MIA_P1_202400452/commands"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -30,11 +32,16 @@ func CmdREP(params map[string]string) string {
 		return "Error: falta el parámetro obligatorio -id"
 	}
 
-	path = reportLocalPath(path)
+	path = strings.TrimSpace(path)
+	id = strings.ToUpper(strings.TrimSpace(id))
 
 	diskPath, partition, _, err := commands.GetMountedPartitionInfo(id)
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Sprintf("Error al crear carpeta del reporte: %v", err)
 	}
 
 	switch name {
@@ -79,6 +86,8 @@ func CmdREP(params map[string]string) string {
 			return "Error: falta el parámetro obligatorio -path_file_ls para reporte file"
 		}
 
+		pathFile = strings.TrimSpace(pathFile)
+
 		return handleReport(func() error {
 			return ReportFILE(diskPath, partition, path, pathFile)
 		})
@@ -109,18 +118,4 @@ func handleReport(fn func() error) string {
 	}
 
 	return "Reporte generado exitosamente"
-}
-
-func reportLocalPath(originalPath string) string {
-	originalPath = strings.TrimSpace(originalPath)
-
-	cleanPath := filepath.Clean(originalPath)
-	fileName := filepath.Base(cleanPath)
-	folderName := filepath.Base(filepath.Dir(cleanPath))
-
-	if folderName == "." || folderName == "/" {
-		return filepath.Join("reportes", fileName)
-	}
-
-	return filepath.Join("reportes", folderName, fileName)
 }

@@ -4,14 +4,19 @@ package services
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"MIA_P2_202400452/internal/ext2"
 )
 
 func (s *FileSystemService) Edit(input FSEditInput) (FSReadResult, error) {
-	mounted, sb, _, err := s.resolveAccess(input.Token, input.ID)
+	mounted, sb, session, err := s.resolveAccess(input.Token, input.ID)
 	if err != nil {
+		return FSReadResult{}, err
+	}
+
+	if err := requireSession(session); err != nil {
 		return FSReadResult{}, err
 	}
 
@@ -31,7 +36,26 @@ func (s *FileSystemService) Edit(input FSEditInput) (FSReadResult, error) {
 		return FSReadResult{}, fmt.Errorf("la ruta no es un archivo")
 	}
 
-	if err := ext2.WriteFileContent(mounted.DiskPath, &sb, &inode, []byte(input.Content)); err != nil {
+	if err := s.requireReadWritePermission(inode, session, "editar el archivo"); err != nil {
+		return FSReadResult{}, err
+	}
+
+	content := firstNonEmpty(input.Content, input.Cont)
+
+	if strings.TrimSpace(input.Contenido) != "" {
+		data, err := os.ReadFile(strings.TrimSpace(input.Contenido))
+		if err != nil {
+			return FSReadResult{}, fmt.Errorf("no se pudo leer el archivo indicado en -contenido: %v", err)
+		}
+
+		content = string(data)
+	}
+
+	if strings.TrimSpace(content) == "" {
+		return FSReadResult{}, fmt.Errorf("debe indicar contenido con -contenido o -cont")
+	}
+
+	if err := ext2.WriteFileContent(mounted.DiskPath, &sb, &inode, []byte(content)); err != nil {
 		return FSReadResult{}, err
 	}
 
@@ -51,13 +75,17 @@ func (s *FileSystemService) Edit(input FSEditInput) (FSReadResult, error) {
 		Type:    "file",
 		Inode:   inodeIdx,
 		Size:    inode.IS,
-		Content: input.Content,
+		Content: content,
 	}, nil
 }
 
 func (s *FileSystemService) Rename(input FSRenameInput) (FSItem, error) {
-	mounted, sb, _, err := s.resolveAccess(input.Token, input.ID)
+	mounted, sb, session, err := s.resolveAccess(input.Token, input.ID)
 	if err != nil {
+		return FSItem{}, err
+	}
+
+	if err := requireSession(session); err != nil {
 		return FSItem{}, err
 	}
 
@@ -81,9 +109,27 @@ func (s *FileSystemService) Rename(input FSRenameInput) (FSItem, error) {
 		return FSItem{}, err
 	}
 
+	inode, err := ext2.ReadInode(mounted.DiskPath, sb, inodeIdx)
+	if err != nil {
+		return FSItem{}, err
+	}
+
+	if err := s.requireWritePermission(inode, session, "renombrar esta entrada"); err != nil {
+		return FSItem{}, err
+	}
+
 	parent := parentPath(targetPath)
 	parentIdx, err := ext2.FindInodeByPath(mounted.DiskPath, sb, parent)
 	if err != nil {
+		return FSItem{}, err
+	}
+
+	parentInode, err := ext2.ReadInode(mounted.DiskPath, sb, parentIdx)
+	if err != nil {
+		return FSItem{}, err
+	}
+
+	if err := s.requireWritePermission(parentInode, session, "modificar la carpeta padre"); err != nil {
 		return FSItem{}, err
 	}
 
@@ -98,11 +144,6 @@ func (s *FileSystemService) Rename(input FSRenameInput) (FSItem, error) {
 	}
 
 	if err := ext2.AddEntryToFolder(mounted.DiskPath, &sb, parentIdx, newName, inodeIdx); err != nil {
-		return FSItem{}, err
-	}
-
-	inode, err := ext2.ReadInode(mounted.DiskPath, sb, inodeIdx)
-	if err != nil {
 		return FSItem{}, err
 	}
 

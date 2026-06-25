@@ -9,10 +9,12 @@ type FSRemoveInput struct {
 }
 
 type FSEditInput struct {
-	Token   string `json:"token"`
-	ID      string `json:"id"`
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Token     string `json:"token"`
+	ID        string `json:"id"`
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+	Cont      string `json:"cont"`
+	Contenido string `json:"contenido"`
 }
 
 type FSRenameInput struct {

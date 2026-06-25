@@ -130,14 +130,22 @@ export async function executeCommand(commandText, mountedId) {
 
     case "edit": {
       const path = cleanPath(flags.path);
-      const content = cleanText(flags.cont || flags.content);
+      const contenido = cleanText(flags.contenido || "");
+      const content = cleanText(flags.cont || flags.content || "");
 
-      const result = await request("/fs/edit", {
+      const payload = {
         id: mountedId,
         path: requireValue(path, "-path"),
-        content: requireValue(content, "-cont"),
-        cont: content,
-      });
+      };
+
+      if (contenido) {
+        payload.contenido = contenido;
+      } else {
+        payload.content = requireValue(content, "-contenido o -cont");
+        payload.cont = content;
+      }
+
+      const result = await request("/fs/edit", payload);
 
       return {
         success: true,
@@ -168,10 +176,8 @@ export async function executeCommand(commandText, mountedId) {
 
       const result = await request("/fs/copy", {
         id: mountedId,
-        path: requireValue(path, "-path"),
-        destPath: requireValue(dest, "-dest"),
-        destination: dest,
-        targetPath: dest,
+        from: requireValue(path, "-path"),
+        to: requireValue(dest, "-destino"),
       });
 
       return {
@@ -186,10 +192,8 @@ export async function executeCommand(commandText, mountedId) {
 
       const result = await request("/fs/move", {
         id: mountedId,
-        path: requireValue(path, "-path"),
-        destPath: requireValue(dest, "-dest"),
-        destination: dest,
-        targetPath: dest,
+        from: requireValue(path, "-path"),
+        to: requireValue(dest, "-destino"),
       });
 
       return {

@@ -9,8 +9,12 @@ import (
 )
 
 func (s *FileSystemService) Remove(input FSRemoveInput) error {
-	mounted, sb, _, err := s.resolveAccess(input.Token, input.ID)
+	mounted, sb, session, err := s.resolveAccess(input.Token, input.ID)
 	if err != nil {
+		return err
+	}
+
+	if err := requireSession(session); err != nil {
 		return err
 	}
 
@@ -25,12 +29,25 @@ func (s *FileSystemService) Remove(input FSRemoveInput) error {
 		return err
 	}
 
-	if err := s.removeInodeRecursive(mounted.DiskPath, &sb, inodeIdx); err != nil {
+	parentIdx, err := ext2.FindInodeByPath(mounted.DiskPath, sb, parentPath(targetPath))
+	if err != nil {
 		return err
 	}
 
-	parentIdx, err := ext2.FindInodeByPath(mounted.DiskPath, sb, parentPath(targetPath))
+	parentInode, err := ext2.ReadInode(mounted.DiskPath, sb, parentIdx)
 	if err != nil {
+		return err
+	}
+
+	if err := s.requireWritePermission(parentInode, session, "modificar la carpeta padre"); err != nil {
+		return err
+	}
+
+	if err := s.validateRemovePermissionsRecursive(mounted.DiskPath, sb, inodeIdx, session); err != nil {
+		return err
+	}
+
+	if err := s.removeInodeRecursive(mounted.DiskPath, &sb, inodeIdx); err != nil {
 		return err
 	}
 

@@ -14,11 +14,44 @@ func (s *FileSystemService) Copy(input FSCopyInput) (FSItem, error) {
 		return FSItem{}, err
 	}
 
+	if err := requireSession(session); err != nil {
+		return FSItem{}, err
+	}
+
 	fromPath := cleanFSPath(input.From)
 	toPath := cleanFSPath(input.To)
 
 	if fromPath == "/" {
 		return FSItem{}, fmt.Errorf("no se puede copiar la raíz")
+	}
+
+	sourceIdx, err := ext2.FindInodeByPath(mounted.DiskPath, sb, fromPath)
+	if err != nil {
+		return FSItem{}, err
+	}
+
+	if err := s.validateCopyPermissionsRecursive(mounted.DiskPath, sb, sourceIdx, session); err != nil {
+		return FSItem{}, err
+	}
+
+	destinationParentPath := parentPath(toPath)
+
+	destinationParentIdx, err := ext2.FindInodeByPath(mounted.DiskPath, sb, destinationParentPath)
+	if err != nil {
+		return FSItem{}, fmt.Errorf("la carpeta destino no existe")
+	}
+
+	destinationParentInode, err := ext2.ReadInode(mounted.DiskPath, sb, destinationParentIdx)
+	if err != nil {
+		return FSItem{}, err
+	}
+
+	if destinationParentInode.IType[0] != '0' {
+		return FSItem{}, fmt.Errorf("el destino debe estar dentro de una carpeta")
+	}
+
+	if err := s.requireWritePermission(destinationParentInode, session, "escribir en la carpeta destino"); err != nil {
+		return FSItem{}, err
 	}
 
 	if _, err := ext2.FindInodeByPath(mounted.DiskPath, sb, toPath); err == nil {
@@ -57,6 +90,72 @@ func (s *FileSystemService) Copy(input FSCopyInput) (FSItem, error) {
 }
 
 func (s *FileSystemService) Move(input FSMoveInput) (FSItem, error) {
+	mounted, sb, session, err := s.resolveAccess(input.Token, input.ID)
+	if err != nil {
+		return FSItem{}, err
+	}
+
+	if err := requireSession(session); err != nil {
+		return FSItem{}, err
+	}
+
+	fromPath := cleanFSPath(input.From)
+	toPath := cleanFSPath(input.To)
+
+	if fromPath == "/" {
+		return FSItem{}, fmt.Errorf("no se puede mover la raíz")
+	}
+
+	sourceIdx, err := ext2.FindInodeByPath(mounted.DiskPath, sb, fromPath)
+	if err != nil {
+		return FSItem{}, err
+	}
+
+	sourceInode, err := ext2.ReadInode(mounted.DiskPath, sb, sourceIdx)
+	if err != nil {
+		return FSItem{}, err
+	}
+
+	if err := s.requireWritePermission(sourceInode, session, "mover esta entrada"); err != nil {
+		return FSItem{}, err
+	}
+
+	sourceParentIdx, err := ext2.FindInodeByPath(mounted.DiskPath, sb, parentPath(fromPath))
+	if err != nil {
+		return FSItem{}, err
+	}
+
+	sourceParentInode, err := ext2.ReadInode(mounted.DiskPath, sb, sourceParentIdx)
+	if err != nil {
+		return FSItem{}, err
+	}
+
+	if err := s.requireWritePermission(sourceParentInode, session, "modificar la carpeta origen"); err != nil {
+		return FSItem{}, err
+	}
+
+	destinationParentIdx, err := ext2.FindInodeByPath(mounted.DiskPath, sb, parentPath(toPath))
+	if err != nil {
+		return FSItem{}, fmt.Errorf("la carpeta destino no existe")
+	}
+
+	destinationParentInode, err := ext2.ReadInode(mounted.DiskPath, sb, destinationParentIdx)
+	if err != nil {
+		return FSItem{}, err
+	}
+
+	if destinationParentInode.IType[0] != '0' {
+		return FSItem{}, fmt.Errorf("el destino debe estar dentro de una carpeta")
+	}
+
+	if err := s.requireWritePermission(destinationParentInode, session, "modificar la carpeta destino"); err != nil {
+		return FSItem{}, err
+	}
+
+	if _, err := ext2.FindInodeByPath(mounted.DiskPath, sb, toPath); err == nil {
+		return FSItem{}, fmt.Errorf("ya existe la ruta destino")
+	}
+
 	item, err := s.Copy(FSCopyInput{
 		Token: input.Token,
 		ID:    input.ID,
@@ -89,20 +188,23 @@ func (s *FileSystemService) copyRecursive(diskPath string, sb *ext2.SuperBlock, 
 		return err
 	}
 
+	if err := s.requireReadPermission(sourceInode, session, "copiar esta entrada"); err != nil {
+		return err
+	}
+
 	if sourceInode.IType[0] == '1' {
 		content, err := ext2.GetFileContent(diskPath, *sb, sourceIdx)
 		if err != nil {
 			return err
 		}
 
-		item, err := s.Mkfile(FSMkfileInput{
+		_, err = s.Mkfile(FSMkfileInput{
 			Token:   session.Token,
 			ID:      session.PartID,
 			Path:    toPath,
 			Content: content,
 			Parents: true,
 		})
-		_ = item
 
 		return err
 	}

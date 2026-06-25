@@ -1,3 +1,3 @@
-module MIA_P1_202400452
+module MIA_P2_202400452
 
-go 1.21
+go 1.22

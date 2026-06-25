@@ -10,6 +10,24 @@ const axiosClient = axios.create({
   }
 });
 
+axiosClient.interceptors.request.use((config) => {
+  try {
+    const rawSession = localStorage.getItem("mia_session");
+
+    if (rawSession) {
+      const session = JSON.parse(rawSession);
+
+      if (session?.token) {
+        config.headers.Authorization = `Bearer ${session.token}`;
+      }
+    }
+  } catch {
+    localStorage.removeItem("mia_session");
+  }
+
+  return config;
+});
+
 export function getErrorMessage(error) {
   if (error?.response?.data?.message) {
     return error.response.data.message;
